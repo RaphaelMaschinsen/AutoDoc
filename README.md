@@ -45,6 +45,8 @@ To generate documentation for your project, run the `main.py` script with the ro
 
     python main.py <root_dir> <folder1> <folder2> ... <folderN>
 
+Source files in the Root directory will be included but non-recursively (only files directly in the root directory). Additional subdirectories files will be searched for source files recursively. 
+
 ### Example
 
     python main.py MyProject MyProject/src MyProject/include
