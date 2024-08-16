@@ -20,6 +20,25 @@ To install AutoDoc, clone the repository and install the required dependencies:
     cd AutoDoc
     pip install -r requirements.txt
 
+## API Key Setup
+
+AutoDoc requires an OpenAI API key to function. Before running the script, you need to replace the placeholder API key in the code with your own. You can find the API key in your OpenAI account.
+
+1. Open the `main.py` file in a text editor.
+2. Locate the line where the `OpenAI` client is initialized with the API key:
+
+   ```python
+   client = OpenAI(api_key="your-api-key-here")
+   ```
+
+3. Replace `"your-api-key-here"` with your actual OpenAI API key:
+
+   ```python
+   client = OpenAI(api_key="sk-...")
+   ```
+
+4. Save the file.
+
 ## Usage
 
 To generate documentation for your project, run the `main.py` script with the root directory of your project and any subdirectories you want to include:
