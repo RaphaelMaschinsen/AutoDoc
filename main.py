@@ -48,14 +48,16 @@ def list_files(root_dir: str, root_file_types: List[str], recursive_dirs: List[s
 
     return project_structure
 
+
 def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
-    """Pairs .h and .cpp files with the same name and identifies unpaired files."""
+    """Pairs .h and .cpp files with the same name, shader files, and identifies unpaired files."""
     paired_files = {}
     unpaired_files = []
 
-    # Separate header and source files
+    # Separate header, source, and shader files
     header_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".h")}
     source_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".cpp")}
+    shader_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".glsl")}
 
     # Pair header and source files
     for base_name in set(header_files.keys()).union(set(source_files.keys())):
@@ -66,9 +68,29 @@ def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
         elif base_name in source_files:
             unpaired_files.append(source_files[base_name])
 
+    # Pair shader files (both paired and unpaired)
+    shader_pairs = {}
+    for base_name, file in shader_files.items():
+        if base_name.endswith("_fragment") or base_name.endswith("_vertex"):
+            core_name = base_name.rsplit('_', 1)[0]
+            if core_name in shader_pairs:
+                shader_pairs[core_name].append(file)
+            else:
+                shader_pairs[core_name] = [file]
+        else:
+            # Handle unpaired shaders
+            unpaired_files.append(file)
+
+    # Add shader pairs to paired_files
+    for core_name, files in shader_pairs.items():
+        if len(files) > 1:
+            paired_files[core_name] = files
+        else:
+            unpaired_files.extend(files)
+
     # Add any non-paired files (like CMakeLists.txt) to unpaired_files
     for file in files:
-        if not file.endswith((".h", ".cpp")) and file not in unpaired_files:
+        if not file.endswith((".h", ".cpp", ".glsl")) and file not in unpaired_files:
             unpaired_files.append(file)
 
     return {**paired_files, "unpaired_files": unpaired_files}
