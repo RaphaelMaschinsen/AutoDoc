@@ -7,8 +7,7 @@ from openai import OpenAI
 from typing import List, Dict, Tuple
 
 # Initialize the OpenAI client
-client = OpenAI(api_key="sk-proj-C4yrFKiqJW2iYnUcTp6AofnM2AOqbC5n5SAqInNuy-MpNzGSDYFz95XKz8NH75vje6d6f2OzyoT3BlbkFJzIol"
-                        "AXoDUFgNIPZ-OGw5JVefrYpDyUqyU19DEA_k-MM8JUXwxfG6Y2am-IGtLYMqQ8beyQKr8A")
+client = OpenAI(api_key="YOUR-API-KEY")
 
 INTERMEDIATE_RESULTS_FILE = "intermediate_results.json"
 
