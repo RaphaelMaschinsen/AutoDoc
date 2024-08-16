@@ -2,9 +2,10 @@
 
 ## Overview
 
-**AutoDoc** is a simple OpenAI based tool designed to automatically generate detailed and structured documentation for your codebase. 
+**AutoDoc** is a simple OpenAI based tool (You will need an OpenAI account, a valid API key and credit) designed to automatically generate detailed and structured documentation for your codebase.
 
-The goal is to create one cohesive document that explains larger projects and can be used to inform both AI and people about the architecture and inner workings of a codebase. 
+
+The goal is to create one cohesive document that explains larger projects and can be used to inform both AI and people about the architecture and inner workings of a codebase.
 
 By analyzing the structure of your project and examining the code files, AutoDoc produces a comprehensive README file that provides an overview of your project, summaries of individual components, and details on how they interact. This makes it easier for developers to understand and navigate your codebase.
 
