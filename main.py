@@ -122,12 +122,13 @@ def create_component_summary_prompt(file_names: List[str], file_content: str, pr
         f"{file_intro}"
         "Please provide a detailed summary. Start with a brief overview, then describe the public interface in detail, "
         "and finally explain the inner workings of the file(s). For the inner workings, also explain how the code is implemented. "
-        "It should be structured into 4 sections: ### Filename(s), #### Overview, #### Public Interface, and #### Implementation. "
+        "It should be structured into 4 sections: ### Filename(s) (as the title), #### Overview, "
+        "#### Public Interface, and #### Implementation. "
         "After the summary, always assign a relevance score from 1 to 10 indicating its importance to the overall project "
         "(1 being not important, 10 being critically important). Be especially critical and try to assign lower scores "
         "unless the file(s) are crucial to the main functionality of the project. The main file itself should "
         "always have a score of 10. The CMakeLists.txt always a score of 0"
-        "Format the relevance score like this: "
+        "Format the relevance score exactly like this: "
         "[Relevance score: 7].\n\n"
         f"{file_content}"
     )
@@ -203,9 +204,56 @@ def generate_project_overview_and_file_tree(summaries: Dict[str, Tuple[str, floa
     print("Project overview content and structure description generated.")
     return project_overview_content, structure_description
 
+def extract_title_overview_and_tree(content: str) -> Tuple[str, str, str]:
+    """Extracts the title, project overview, and file tree from the generated content."""
+    title = ""
+    overview = ""
+    file_tree = ""
+
+    # Define markers for each section
+    title_marker = "Project Title:"
+    overview_marker = "Project Overview:"
+    file_tree_marker = "File Tree Graph:"
+
+    # Find the indices of each section
+    title_start = content.find(title_marker)
+    overview_start = content.find(overview_marker)
+    file_tree_start = content.find(file_tree_marker)
+
+    # Extract title
+    if title_start != -1:
+        title_end = content.find("\n\n", title_start)
+        title = content[title_start + len(title_marker):title_end].strip(" **\n")
+
+    # Extract overview
+    if overview_start != -1:
+        overview_end = content.find("\n\n", overview_start)
+        if overview_end == -1:
+            overview_end = len(content)  # Take until the end if no further section
+        overview = content[overview_start + len(overview_marker):overview_end].strip(" **\n")
+
+    # Extract file tree
+    if file_tree_start != -1:
+        file_tree_start_pos = content.find("```", file_tree_start)
+        if file_tree_start_pos != -1:
+            file_tree_end = content.find("\n```", file_tree_start_pos)
+            if file_tree_end == -1:
+                file_tree = content[file_tree_start_pos:].strip()
+                # Add triple backticks at the end if not present
+                if not file_tree.endswith("```"):
+                    file_tree += "\n```"
+            else:
+                file_tree = content[file_tree_start_pos:file_tree_end + 4].strip()
+        else:
+            # If no starting triple backticks found, assume the tree starts at the marker
+            file_tree = content[file_tree_start + len(file_tree_marker):].strip()
+            # Add triple backticks at the beginning and end
+            file_tree = f"```\n{file_tree}\n```"
+
+    return title, overview, file_tree
 
 def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tuple[str, float]]],
-                                          file_tree: str) -> Tuple[str, str]:
+                                          file_tree: str) -> Tuple[str, str, str]:
     """Generates the title, project overview, and file tree using GPT based on the 5 most relevant components."""
     print("Generating title, project overview, and file tree with GPT...")
 
@@ -215,7 +263,8 @@ def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tupl
     prompt = (
         f"Based on the following components and file tree, generate a project title, overview, and a file tree graph: \n\n"
         f"Components Overview: \n{components_overview}\n\n"
-        f"File Tree: \n{file_tree}"
+        f"File Tree: \n{file_tree}\n\n"
+        f"Please ensure that the output includes a clear title, a detailed project overview, and the file tree diagram."
     )
 
     completion = client.chat.completions.create(
@@ -232,16 +281,12 @@ def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tupl
         ]
     )
 
-    result = completion.choices[0].message.content.split("\n\n")
-    title = result[0].strip() if result else "Project Title"
-    overview = result[1].strip() if len(result) > 1 else components_overview
-    file_tree_graph = result[2].strip() if len(result) > 2 else file_tree
+    return extract_title_overview_and_tree(completion.choices[0].message.content)
 
-    return title, overview, file_tree_graph
 
 def strip_markdown(text: str) -> str:
-    """Strip markdown formatting, remove instances of 'Project Title' or 'Title', and strip colons and leading spaces."""
-    # Remove markdown bold, italic, headers, extra spaces, and colons
+    """Strip markdown formatting, remove instances of 'Project Title' or 'Title', and strip colons, quotes, and leading spaces."""
+    # Remove markdown bold, italic, headers, extra spaces, quotes, and colons
     text = re.sub(r'\*\*|__|#|"|:|\s\s+', '', text)
     # Remove any instance of "Project Title" or "Title" (case insensitive)
     text = re.sub(r'\b(project title|title)\b', '', text, flags=re.IGNORECASE)
@@ -324,7 +369,9 @@ def main():
     project_overview_content, file_tree = generate_project_overview_and_file_tree(summaries, project_structure)
 
     print("Generating title, project overview, and file tree graph with GPT...")
-    title, project_overview, file_tree_graph = generate_title_and_overview_with_tree(sorted(summaries.items(), key=lambda item: item[1][1], reverse=True)[:5], file_tree)
+    title, project_overview, file_tree_graph = generate_title_and_overview_with_tree(
+        sorted(summaries.items(), key=lambda item: item[1][1], reverse=True)[:5], file_tree
+    )
 
     print("Generating the final README...")
     readme_content = generate_readme(title, project_overview, file_tree_graph, summaries)
