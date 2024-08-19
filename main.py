@@ -7,7 +7,7 @@ from typing import List, Dict, Tuple
 
 # Initialize the OpenAI client
 client = OpenAI(
-    api_key="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")
+    api_key="YOUR-API-KEY")
 
 INTERMEDIATE_RESULTS_FILE = "intermediate_results.json"
 
@@ -120,7 +120,6 @@ def pair_shader_files(shader_files: Dict[str, str]) -> Dict[str, List[str]]:
     return paired_files
 
 
-
 def read_file(file_path: str) -> str:
     """Reads the content of a file."""
     print(f"Reading file: {file_path}")
@@ -147,15 +146,19 @@ def create_component_summary_prompt(file_names: List[str], file_content: str, pr
     base_prompt = (
         f"Here is an overview of the project structure:\n{project_overview}\n\n"
         f"{file_intro}"
-        "Please provide a detailed summary. Start with a brief overview, then describe the public interface in detail, "
-        "and finally explain the inner workings of the file(s). For the inner workings, also explain how the code is implemented. "
-        "It should be structured into 4 sections: ### Filename(s) (as the title), #### Overview, "
-        "#### Public Interface, and #### Implementation. "
+        "Please provide a detailed summary. Start with a detailed overview, then describe the public interface in detail, "
+        "and finally explain the inner workings of the file(s). For the inner workings, also explain how the code is "
+        "implemented (mostly in words and avoid code snippets as much as possible)."
+        "It should be structured into 4 sections: ## (this title has to be the filename(s) without the path and "
+        "if there are several files they should be formatted like this 'file1 & file2' and neither the word "
+        "filename nor title should appear in this section), ### Overview, "
+        "### Public Interface, and ### Implementation."
         "After the summary, always assign a relevance score from 1 to 10 indicating its importance to the overall project "
         "(1 being not important, 10 being critically important). Be especially critical and try to assign lower scores "
         "unless the file(s) are crucial to the main functionality of the project. The main file itself should "
         "always have a score of 10. The CMakeLists.txt always a score of 0"
-        "Format the relevance score exactly like this: [Relevance score: 7].\n\n"
+        "Format the relevance score exactly like this: [Relevance score: 7] but don't mention the relevance otherwise"
+        "and don't add a title called Relevance, it should only be the score within the square brackets.\n\n"
         f"{file_content}"
     )
 
@@ -214,8 +217,6 @@ def summarize_component_files(file_paths: List[str], file_contents: List[str], r
     results[file_key] = (summary, relevance)
     save_intermediate_results(results)
     return summary, relevance
-
-
 
 
 def generate_project_overview_and_file_tree(summaries: Dict[str, Tuple[str, float]],
@@ -319,8 +320,8 @@ def generate_readme(title: str, project_overview: str, file_tree: str, summaries
     clean_title = strip_markdown(title)
     sorted_summaries = sorted(summaries.items(), key=lambda item: item[1][1], reverse=True)
 
-    summary_content_list = [f"## {os.path.basename(name)}\n\n{remove_summary_title(summary)}" for name, (summary, _) in
-                            sorted_summaries]
+    # Apply `format_summary_title` to each summary to properly format it
+    summary_content_list = [remove_relevance_score(summary) for _, (summary, _) in sorted_summaries]
     summary_content = "\n\n".join(summary_content_list)
 
     readme_content = f"# {clean_title}\n\n## Project Overview\n\n{project_overview}\n\n## File Tree\n\n{file_tree}\n\n## Component Summaries\n\n{summary_content}"
@@ -328,10 +329,14 @@ def generate_readme(title: str, project_overview: str, file_tree: str, summaries
     return readme_content
 
 
-def remove_summary_title(summary: str) -> str:
-    """Remove the filename line (title) from the summary."""
+def remove_relevance_score(summary: str) -> str:
+    """Remove the relevance score from the summary."""
     summary_lines = summary.splitlines()
-    return "\n".join(summary_lines[1:]).strip() if len(summary_lines) > 1 else summary.strip()
+
+    # Remove any line containing "Relevance score:"
+    filtered_lines = [line for line in summary_lines if not re.search(r'Relevance score:', line)]
+
+    return "\n".join(filtered_lines).strip()
 
 
 def main():
