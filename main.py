@@ -1,13 +1,13 @@
 import json
-import os
 import sys
 import re
-
+import os
 from openai import OpenAI
 from typing import List, Dict, Tuple
 
 # Initialize the OpenAI client
-client = OpenAI(api_key="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")
+client = OpenAI(
+    api_key="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")
 
 INTERMEDIATE_RESULTS_FILE = "intermediate_results.json"
 
@@ -15,23 +15,23 @@ INTERMEDIATE_RESULTS_FILE = "intermediate_results.json"
 def load_intermediate_results() -> Dict[str, Tuple[str, float]]:
     """Load intermediate results from a JSON file."""
     if os.path.exists(INTERMEDIATE_RESULTS_FILE):
-        print("Loading intermediate results...")
+        print("Loading intermediate results from file...")
         with open(INTERMEDIATE_RESULTS_FILE, "r", encoding="utf-8") as file:
             return json.load(file)
+    print("No intermediate results found. Starting fresh...")
     return {}
 
 
 def save_intermediate_results(results: Dict[str, Tuple[str, float]]):
     """Save intermediate results to a JSON file."""
-    print("Saving intermediate results...")
+    print("Saving intermediate results to file...")
     with open(INTERMEDIATE_RESULTS_FILE, "w", encoding="utf-8") as file:
         json.dump(results, file, ensure_ascii=False, indent=4)
 
 
-def list_files(root_dir: str, root_file_types: List[str], recursive_dirs: List[str], recursive_file_types: List[str]) -> \
-Dict[str, List[str]]:
+def list_files(root_dir: str, root_file_types: List[str], recursive_dirs: List[str], recursive_file_types: List[str]) -> Dict[str, List[str]]:
     """Lists files in the root directory non-recursively and in specified folders recursively."""
-    print("Listing files in the project...")
+    print(f"Listing files in {root_dir} and subdirectories...")
     project_structure = {}
 
     # Scan the root directory (non-recursively)
@@ -42,26 +42,29 @@ Dict[str, List[str]]:
 
     # Scan the specified directories (recursively)
     for recursive_dir in recursive_dirs:
+        print(f"Recursively listing files in {recursive_dir}...")
         for subdir, _, files in os.walk(recursive_dir):
             relevant_files = [os.path.join(subdir, file) for file in files if
                               any(file.endswith(ft) for ft in recursive_file_types)]
             if relevant_files:
                 project_structure[subdir] = relevant_files
 
-    print(f"Project structure: {project_structure}")
+    print(f"File listing complete. Found {sum(len(files) for files in project_structure.values())} files.")
     return project_structure
 
 
 def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
     """Pairs .h and .cpp files with the same name, shader files, and identifies unpaired files."""
-    print("Pairing header and source files...")
+    print("Pairing header, source, shader, and other files...")
     paired_files = {}
     unpaired_files = []
 
     header_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".h")}
     source_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".cpp")}
     shader_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".glsl")}
+    cmake_files = [file for file in files if "CMakeLists.txt" in os.path.basename(file)]
 
+    # Pair header and source files
     for base_name in set(header_files.keys()).union(set(source_files.keys())):
         if base_name in header_files and base_name in source_files:
             paired_files[base_name] = [header_files[base_name], source_files[base_name]]
@@ -70,52 +73,76 @@ def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
         elif base_name in source_files:
             unpaired_files.append(source_files[base_name])
 
-    shader_pairs = {}
+    # Pair shader files
+    shader_pairs = pair_shader_files(shader_files)
+    paired_files.update(shader_pairs)
+
+    # Add CMake files
+    for cmake_file in cmake_files:
+        paired_files[os.path.basename(cmake_file)] = [cmake_file]
+
+    # Add any unpaired files (shader files that weren't paired, or other files)
+    unpaired_files.extend(
+        file for file in files if file not in unpaired_files and not file.endswith((".h", ".cpp", ".glsl")) and file not in paired_files.values()
+    )
+    paired_files["unpaired_files"] = unpaired_files
+
+    print(f"Pairing complete. Paired files: {len(paired_files) - 1}, Unpaired files: {len(unpaired_files)}")
+    return paired_files
+
+
+def pair_shader_files(shader_files: Dict[str, str]) -> Dict[str, List[str]]:
+    """Pairs shader files based on naming conventions and sorts them to ensure paired shaders are next to each other."""
+    print("Pairing shader files...")
+    paired_files = {}
+    unpaired_files = []
+
     for base_name, file in shader_files.items():
         if base_name.endswith("_fragment") or base_name.endswith("_vertex"):
             core_name = base_name.rsplit('_', 1)[0]
-            if core_name in shader_pairs:
-                shader_pairs[core_name].append(file)
+            if core_name in paired_files:
+                paired_files[core_name].append(file)
+                # Sort the shaders within the pair to ensure consistent order
+                paired_files[core_name].sort()
             else:
-                shader_pairs[core_name] = [file]
+                paired_files[core_name] = [file]
         else:
-            unpaired_files.append(file)
+            paired_files[base_name] = [file]  # Ensure unpaired files are still included
 
-    for core_name, files in shader_pairs.items():
-        if len(files) > 1:
-            paired_files[core_name] = files
-        else:
+    # Move unpaired shader files into the unpaired list if they have not been paired
+    for core_name, files in list(paired_files.items()):
+        if len(files) < 2:
             unpaired_files.extend(files)
+            del paired_files[core_name]
 
-    for file in files:
-        if not file.endswith((".h", ".cpp", ".glsl")) and file not in unpaired_files:
-            unpaired_files.append(file)
-
-    paired_files["unpaired_files"] = unpaired_files
-
-    print(f"Paired files: {paired_files}")
+    print(f"Shader pairing complete. Paired shaders: {len(paired_files)}, Unpaired shaders: {len(unpaired_files)}")
+    paired_files["unpaired_shaders"] = unpaired_files  # Add unpaired shaders separately
     return paired_files
+
 
 
 def read_file(file_path: str) -> str:
     """Reads the content of a file."""
+    print(f"Reading file: {file_path}")
     with open(file_path, "r", encoding="utf-8") as file:
         return file.read()
 
 
 def should_lower_relevance_due_to_tests(file_path: str, file_content: str) -> bool:
     """Determines if a file is likely a test file and should have lower relevance."""
-    if 'test' in os.path.basename(file_path).lower() and 'main' in file_content.lower():
-        return True
-    return False
+    is_test_file = 'test' in os.path.basename(file_path).lower() and 'main' in file_content.lower()
+    if is_test_file:
+        print(f"File {file_path} identified as a test file.")
+    return is_test_file
 
 
 def create_component_summary_prompt(file_names: List[str], file_content: str, project_overview: str, is_test_file: bool) -> str:
     """Creates a prompt for summarizing code files with consistent formatting."""
-    if len(file_names) == 1:
-        file_intro = f"The following is a code file named {file_names[0]}.\n\n"
-    else:
-        file_intro = f"The following are code files named {', '.join(file_names)}.\n\n"
+    if not file_names:
+        raise ValueError("The file_names list is empty. Cannot create a summary prompt without file names.")
+
+    file_intro = f"The following are code files named {', '.join(file_names)}.\n\n" if len(
+        file_names) > 1 else f"The following is a code file named {file_names[0]}.\n\n"
 
     base_prompt = (
         f"Here is an overview of the project structure:\n{project_overview}\n\n"
@@ -128,8 +155,7 @@ def create_component_summary_prompt(file_names: List[str], file_content: str, pr
         "(1 being not important, 10 being critically important). Be especially critical and try to assign lower scores "
         "unless the file(s) are crucial to the main functionality of the project. The main file itself should "
         "always have a score of 10. The CMakeLists.txt always a score of 0"
-        "Format the relevance score exactly like this: "
-        "[Relevance score: 7].\n\n"
+        "Format the relevance score exactly like this: [Relevance score: 7].\n\n"
         f"{file_content}"
     )
 
@@ -142,30 +168,34 @@ def create_component_summary_prompt(file_names: List[str], file_content: str, pr
 def extract_relevance_score(summary: str) -> float:
     """Extracts the relevance score from the summary using regular expressions for robustness."""
     match = re.search(r'Relevance score:\s*(\d+)', summary)
-    if match:
-        return float(match.group(1))
-    return 5.0  # Default to 5 if parsing fails
+    relevance = float(match.group(1)) if match else 5.0
+    print(f"Extracted relevance score: {relevance}")
+    return relevance
 
 
-def summarize_component_files(file_paths: List[str], file_contents: List[str], results: Dict[str, Tuple[str, float]],
-                              project_overview: str) -> Tuple[str, float]:
+def summarize_component_files(file_paths: List[str], file_contents: List[str], results: Dict[str, Tuple[str, float]], project_overview: str) -> Tuple[str, float]:
     """Uses OpenAI to summarize the combined content of related files and assign a relevance score."""
+    if not file_paths or not file_contents:
+        print(f"file_paths: {file_paths}")  # Debugging statement
+        print(f"file_contents: {file_contents}")  # Debugging statement
+        raise ValueError("file_paths or file_contents is empty. Cannot summarize without valid file paths and contents.")
+
     combined_content = "\n\n".join(file_contents)
     file_key = '|'.join(sorted(file_paths))
     file_names = [os.path.basename(fp) for fp in file_paths]
 
     if file_key in results:
-        print(f"Skipping {file_key}, already summarized.")
+        print(f"Summary for {file_key} already exists. Skipping...")
         return results[file_key]
 
-    print(f"Summarizing files: {file_names}")
+    print(f"Summarizing files: {', '.join(file_names)}")
     combined_content = f"/* Combined files: {', '.join(file_names)} */\n\n" + combined_content
 
     is_test_file = any(should_lower_relevance_due_to_tests(fp, fc) for fp, fc in zip(file_paths, file_contents))
     prompt = create_component_summary_prompt(file_names, combined_content, project_overview, is_test_file)
 
     completion = client.chat.completions.create(
-        model="gpt-4o-2024-08-06",
+        model="gpt-4o",
         messages=[
             {
                 "role": "system",
@@ -186,6 +216,8 @@ def summarize_component_files(file_paths: List[str], file_contents: List[str], r
     return summary, relevance
 
 
+
+
 def generate_project_overview_and_file_tree(summaries: Dict[str, Tuple[str, float]],
                                             project_structure: Dict[str, List[str]]) -> Tuple[str, str]:
     """Generates a project overview and file tree using the 5 most relevant components."""
@@ -196,79 +228,67 @@ def generate_project_overview_and_file_tree(summaries: Dict[str, Tuple[str, floa
     for name, (summary, relevance) in sorted_summaries:
         project_overview_content += f"- **{os.path.basename(name)}**: {summary.splitlines()[1]} [Relevance: {relevance}]\n"
 
+    # Include all files in the structure description
     structure_description = "\n".join(
-        [f"{key}:\n  " + "\n  ".join(files) for key, files in project_structure.items() if any(
-            os.path.basename(name) in file for file in files for name, _ in sorted_summaries)]
+        [f"{key}:\n  " + "\n  ".join(files) for key, files in project_structure.items()]
     )
 
-    print("Project overview content and structure description generated.")
+    print("Project overview and file tree generated.")
     return project_overview_content, structure_description
+
 
 def extract_title_overview_and_tree(content: str) -> Tuple[str, str, str]:
     """Extracts the title, project overview, and file tree from the generated content."""
-    title = ""
-    overview = ""
-    file_tree = ""
-
-    # Define markers for each section
+    print("Extracting title, project overview, and file tree...")
     title_marker = "Project Title:"
     overview_marker = "Project Overview:"
     file_tree_marker = "File Tree Graph:"
 
-    # Find the indices of each section
-    title_start = content.find(title_marker)
-    overview_start = content.find(overview_marker)
-    file_tree_start = content.find(file_tree_marker)
+    title = extract_section(content, title_marker)
+    overview = extract_section(content, overview_marker)
+    file_tree = extract_section(content, file_tree_marker)
 
-    # Extract title
-    if title_start != -1:
-        title_end = content.find("\n\n", title_start)
-        title = content[title_start + len(title_marker):title_end].strip(" **\n")
-
-    # Extract overview
-    if overview_start != -1:
-        overview_end = content.find("\n\n", overview_start)
-        if overview_end == -1:
-            overview_end = len(content)  # Take until the end if no further section
-        overview = content[overview_start + len(overview_marker):overview_end].strip(" **\n")
-
-    # Extract file tree
-    if file_tree_start != -1:
-        file_tree_start_pos = content.find("```", file_tree_start)
-        if file_tree_start_pos != -1:
-            file_tree_end = content.find("\n```", file_tree_start_pos)
-            if file_tree_end == -1:
-                file_tree = content[file_tree_start_pos:].strip()
-                # Add triple backticks at the end if not present
-                if not file_tree.endswith("```"):
-                    file_tree += "\n```"
-            else:
-                file_tree = content[file_tree_start_pos:file_tree_end + 4].strip()
-        else:
-            # If no starting triple backticks found, assume the tree starts at the marker
-            file_tree = content[file_tree_start + len(file_tree_marker):].strip()
-            # Add triple backticks at the beginning and end
-            file_tree = f"```\n{file_tree}\n```"
-
+    print(f"Extracted title: {title}, overview: {overview[:30]}..., file tree: {file_tree[:30]}...")
     return title, overview, file_tree
 
-def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tuple[str, float]]],
-                                          file_tree: str) -> Tuple[str, str, str]:
+
+def extract_section(content: str, marker: str) -> str:
+    """Extracts a section from content based on a marker."""
+    section_start = content.find(marker)
+    if section_start == -1:
+        return ""
+
+    section_end = content.find("\n\n", section_start)
+    if section_end == -1:
+        section_end = len(content)
+
+    section = content[section_start + len(marker):section_end].strip()
+
+    return section
+
+
+def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tuple[str, float]]], file_tree: str) -> \
+Tuple[str, str, str]:
     """Generates the title, project overview, and file tree using GPT based on the 5 most relevant components."""
     print("Generating title, project overview, and file tree with GPT...")
+    components_overview = "\n".join(
+        [f"{os.path.basename(name)}: {summary.splitlines()[1]}" for name, (summary, _) in sorted_summaries])
 
-    components_overview = "\n".join([f"{os.path.basename(name)}: {summary.splitlines()[1]}"
-                                     for name, (summary, _) in sorted_summaries])
+    print(file_tree)
 
     prompt = (
-        f"Based on the following components and file tree, generate a project title, overview, and a file tree graph: \n\n"
+        f"Based on the following components and file tree, generate a project title, overview"
+        f" and a file tree graph diagram with the root having the project name: \n\n"
         f"Components Overview: \n{components_overview}\n\n"
         f"File Tree: \n{file_tree}\n\n"
         f"Please ensure that the output includes a clear title, a detailed project overview, and the file tree diagram."
+        f"Ensure that the the summary doesn't contain any markup characters and that the sections start with: "
+        f"'Project Title:', 'Project Overview:' and 'File Tree Graph:'. Also ensure that the file tree graph is"
+        f"surrounded by triple backticks."
     )
 
     completion = client.chat.completions.create(
-        model="gpt-4o-2024-08-06",
+        model="gpt-4o",
         messages=[
             {
                 "role": "system",
@@ -281,61 +301,40 @@ def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tupl
         ]
     )
 
-    return extract_title_overview_and_tree(completion.choices[0].message.content)
+    title, overview, file_tree = extract_title_overview_and_tree(completion.choices[0].message.content)
+    print(f"Generated title: {title}, overview length: {len(overview)}, file tree length: {len(file_tree)}")
+    return title, overview, file_tree
 
 
 def strip_markdown(text: str) -> str:
     """Strip markdown formatting, remove instances of 'Project Title' or 'Title', and strip colons, quotes, and leading spaces."""
-    # Remove markdown bold, italic, headers, extra spaces, quotes, and colons
     text = re.sub(r'\*\*|__|#|"|:|\s\s+', '', text)
-    # Remove any instance of "Project Title" or "Title" (case insensitive)
     text = re.sub(r'\b(project title|title)\b', '', text, flags=re.IGNORECASE)
-    # Strip leading/trailing whitespace
-    text = text.strip()
-    return text
+    return text.strip()
+
 
 def generate_readme(title: str, project_overview: str, file_tree: str, summaries: Dict[str, Tuple[str, float]]) -> str:
     """Generates the final README by combining the title, project overview, file tree, and all component summaries."""
     print("Generating final README...")
-
-    # Strip any markdown formatting and unwanted words from the title
     clean_title = strip_markdown(title)
-
-    # Sort summaries by relevance
     sorted_summaries = sorted(summaries.items(), key=lambda item: item[1][1], reverse=True)
 
-    summary_content_list = []
-
-    for name, (summary, _) in sorted_summaries:
-        # Remove the filename line (title) from the summary
-        summary_lines = summary.splitlines()
-
-        # Ensure there are at least two lines before attempting to remove the title
-        if len(summary_lines) > 1:
-            summary_without_title = "\n".join(summary_lines[1:]).strip()
-        else:
-            summary_without_title = summary.strip()
-
-        # Add each component summary with consistent formatting
-        summary_content_list.append(f"## {os.path.basename(name)}\n\n{summary_without_title}")
-
-    # Join the component summaries with two newlines between each for clarity
+    summary_content_list = [f"## {os.path.basename(name)}\n\n{remove_summary_title(summary)}" for name, (summary, _) in
+                            sorted_summaries]
     summary_content = "\n\n".join(summary_content_list)
 
-    # Assemble the final README content
-    readme_content = (
-        f"# {clean_title}\n\n"  # Use the cleaned title
-        f"## Project Overview\n\n{project_overview}\n\n"
-        f"## File Tree\n\n{file_tree}\n\n"
-        f"## Component Summaries\n\n{summary_content}"
-    )
-
-    print("Final README generated.")
+    readme_content = f"# {clean_title}\n\n## Project Overview\n\n{project_overview}\n\n## File Tree\n\n{file_tree}\n\n## Component Summaries\n\n{summary_content}"
+    print("README content generated.")
     return readme_content
 
 
+def remove_summary_title(summary: str) -> str:
+    """Remove the filename line (title) from the summary."""
+    summary_lines = summary.splitlines()
+    return "\n".join(summary_lines[1:]).strip() if len(summary_lines) > 1 else summary.strip()
+
+
 def main():
-    print("Starting README generation process...")
     if len(sys.argv) < 3:
         print("Usage: python generate_readme.py <root_dir> <folder1> <folder2> ... <folderN>")
         sys.exit(1)
@@ -344,6 +343,7 @@ def main():
     folders_to_analyze = sys.argv[2:]
     file_types = [".h", ".cpp", ".glsl", "CMakeLists.txt"]
 
+    print("Loading intermediate results...")
     results = load_intermediate_results()
 
     print("Listing project files...")
@@ -355,10 +355,13 @@ def main():
         paired_files = pair_header_and_source_files(files)
 
         for name, file_paths in paired_files.items():
-            if name != "unpaired_files":
-                file_contents = [read_file(file_path) for file_path in file_paths]
-                summary, relevance = summarize_component_files(file_paths, file_contents, results, project_overview)
-                summaries[name] = (summary, relevance)
+            if name != "unpaired_files" and file_paths:
+                file_contents = [read_file(file_path) for file_path in file_paths if os.path.exists(file_path)]
+                if file_contents:
+                    summary, relevance = summarize_component_files(file_paths, file_contents, results, project_overview)
+                    summaries[name] = (summary, relevance)
+                else:
+                    print(f"Warning: No content found for files {file_paths}. Skipping...")
 
         for file_path in paired_files.get("unpaired_files", []):
             file_content = read_file(file_path)
@@ -375,8 +378,8 @@ def main():
 
     print("Generating the final README...")
     readme_content = generate_readme(title, project_overview, file_tree_graph, summaries)
-
     readme_path = os.path.join(root_dir, "README.md")
+
     with open(readme_path, "w", encoding="utf-8") as readme_file:
         readme_file.write(readme_content)
 
