@@ -11,6 +11,7 @@ By analyzing the structure of your project and examining the code files, AutoDoc
 ## Features
 
 - **Automatic Documentation Generation**: Generates a detailed README based on your project's code structure.
+- **Saves Intermediate Results**: It saves summaries for individual source files and only regenerates those summaries if the source files have been modified.
 - **Code Summaries**: Provides summaries for individual files, including details on their public interface and implementation.
 - **Support for Paired Files**: Automatically pairs related files (e.g., `.h` and `.cpp`, shader files) and generates combined summaries.
 - **Customizable Structure**: Ensures that the README structure can be easily tailored to your project's needs.

@@ -28,7 +28,7 @@ import sys
 import re
 import os
 from openai import OpenAI
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 
 # Initialize the OpenAI client
 client = OpenAI(
@@ -36,8 +36,7 @@ client = OpenAI(
 
 INTERMEDIATE_RESULTS_FILE = "intermediate_results.json"
 
-
-def load_intermediate_results() -> Dict[str, Tuple[str, float]]:
+def load_intermediate_results() -> Dict[str, Dict[str, Any]]:
     """Load intermediate results from a JSON file."""
     if os.path.exists(INTERMEDIATE_RESULTS_FILE):
         print("Loading intermediate results from file...")
@@ -47,7 +46,7 @@ def load_intermediate_results() -> Dict[str, Tuple[str, float]]:
     return {}
 
 
-def save_intermediate_results(results: Dict[str, Tuple[str, float]]):
+def save_intermediate_results(results: Dict[str, Dict[str, Any]]):
     """Save intermediate results to a JSON file."""
     print("Saving intermediate results to file...")
     with open(INTERMEDIATE_RESULTS_FILE, "w", encoding="utf-8") as file:
@@ -84,10 +83,10 @@ def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
     paired_files = {}
     unpaired_files = []
 
-    header_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".h")}
-    source_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".cpp")}
-    shader_files = {os.path.splitext(os.path.basename(file))[0]: file for file in files if file.endswith(".glsl")}
-    cmake_files = [file for file in files if "CMakeLists.txt" in os.path.basename(file)]
+    header_files = {os.path.splitext(os.path.basename(f))[0]: f for f in files if f.endswith(".h")}
+    source_files = {os.path.splitext(os.path.basename(f))[0]: f for f in files if f.endswith(".cpp")}
+    shader_files = {os.path.splitext(os.path.basename(f))[0]: f for f in files if f.endswith(".glsl")}
+    cmake_files = [f for f in files if "CMakeLists.txt" in os.path.basename(f)]
 
     # Pair header and source files
     for base_name in set(header_files.keys()).union(set(source_files.keys())):
@@ -108,7 +107,7 @@ def pair_header_and_source_files(files: List[str]) -> Dict[str, List[str]]:
 
     # Add any unpaired files (shader files that weren't paired, or other files)
     unpaired_files.extend(
-        file for file in files if file not in unpaired_files and not file.endswith((".h", ".cpp", ".glsl")) and file not in paired_files.values()
+        f for f in files if f not in unpaired_files and not f.endswith((".h", ".cpp", ".glsl")) and f not in paired_files.values()
     )
     paired_files["unpaired_files"] = unpaired_files
 
@@ -122,17 +121,17 @@ def pair_shader_files(shader_files: Dict[str, str]) -> Dict[str, List[str]]:
     paired_files = {}
     unpaired_files = []
 
-    for base_name, file in shader_files.items():
+    for base_name, file_path in shader_files.items():
         if base_name.endswith("_fragment") or base_name.endswith("_vertex"):
             core_name = base_name.rsplit('_', 1)[0]
             if core_name in paired_files:
-                paired_files[core_name].append(file)
+                paired_files[core_name].append(file_path)
                 # Sort the shaders within the pair to ensure consistent order
                 paired_files[core_name].sort()
             else:
-                paired_files[core_name] = [file]
+                paired_files[core_name] = [file_path]
         else:
-            paired_files[base_name] = [file]  # Ensure unpaired files are still included
+            paired_files[base_name] = [file_path]  # Ensure unpaired files are still included
 
     # Move unpaired shader files into the unpaired list if they have not been paired
     for core_name, files in list(paired_files.items()):
@@ -201,20 +200,30 @@ def extract_relevance_score(summary: str) -> float:
     return relevance
 
 
-def summarize_component_files(file_paths: List[str], file_contents: List[str], results: Dict[str, Tuple[str, float]], project_overview: str) -> Tuple[str, float]:
+def summarize_component_files(file_paths: List[str], file_contents: List[str], results: Dict[str, Dict[str, Any]], project_overview: str) -> Tuple[str, float]:
     """Uses OpenAI to summarize the combined content of related files and assign a relevance score."""
     if not file_paths or not file_contents:
         print(f"file_paths: {file_paths}")  # Debugging statement
         print(f"file_contents: {file_contents}")  # Debugging statement
         raise ValueError("file_paths or file_contents is empty. Cannot summarize without valid file paths and contents.")
 
-    combined_content = "\n\n".join(file_contents)
-    file_key = '|'.join(sorted(file_paths))
+    file_paths = sorted(file_paths)
+    file_key = '|'.join(file_paths)
     file_names = [os.path.basename(fp) for fp in file_paths]
+    combined_content = "\n\n".join(file_contents)
+
+    # Get current last modified times
+    current_mtimes = [os.path.getmtime(fp) for fp in file_paths]
 
     if file_key in results:
-        print(f"Summary for {file_key} already exists. Skipping...")
-        return results[file_key]
+        stored_data = results[file_key]
+        stored_last_modified_times = stored_data.get('last_modified_times', [])
+
+        if stored_last_modified_times == current_mtimes:
+            print(f"Summary for {file_key} is up to date. Skipping...")
+            return stored_data['summary'], stored_data['relevance']
+        else:
+            print(f"Files for {file_key} have been modified. Regenerating summary.")
 
     print(f"Summarizing files: {', '.join(file_names)}")
     combined_content = f"/* Combined files: {', '.join(file_names)} */\n\n" + combined_content
@@ -239,7 +248,12 @@ def summarize_component_files(file_paths: List[str], file_contents: List[str], r
     )
     summary = completion.choices[0].message.content
     relevance = extract_relevance_score(summary)
-    results[file_key] = (summary, relevance)
+    # Store the summary, relevance, and current_mtimes in results
+    results[file_key] = {
+        'summary': summary,
+        'relevance': relevance,
+        'last_modified_times': current_mtimes,
+    }
     save_intermediate_results(results)
     return summary, relevance
 
@@ -293,14 +307,11 @@ def extract_section(content: str, marker: str) -> str:
     return section
 
 
-def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tuple[str, float]]], file_tree: str) -> \
-Tuple[str, str, str]:
+def generate_title_and_overview_with_tree(sorted_summaries: List[Tuple[str, Tuple[str, float]]], file_tree: str) -> Tuple[str, str, str]:
     """Generates the title, project overview, and file tree using GPT based on the 5 most relevant components."""
     print("Generating title, project overview, and file tree with GPT...")
     components_overview = "\n".join(
         [f"{os.path.basename(name)}: {summary.splitlines()[1]}" for name, (summary, _) in sorted_summaries])
-
-    print(file_tree)
 
     prompt = (
         f"Based on the following components and file tree, generate a project title, overview"
@@ -345,7 +356,7 @@ def generate_readme(title: str, project_overview: str, file_tree: str, summaries
     clean_title = strip_markdown(title)
     sorted_summaries = sorted(summaries.items(), key=lambda item: item[1][1], reverse=True)
 
-    # Apply `format_summary_title` to each summary to properly format it
+    # Apply `remove_relevance_score` to each summary to properly format it
     summary_content_list = [remove_relevance_score(summary) for _, (summary, _) in sorted_summaries]
     summary_content = "\n\n".join(summary_content_list)
 
